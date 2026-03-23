@@ -6,6 +6,7 @@ import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/com
 import { Input } from "@/components/ui/input";
 import { useAuth } from "@/context/useAuth";
 import { useToast } from "@/hooks/use-toast";
+import { useAutoRefresh } from "@/hooks/useAutoRefresh";
 import { api } from "@/lib/api-client";
 import ProfileEditorDialog from "@/components/ProfileEditorDialog";
 import {
@@ -181,8 +182,12 @@ export default function GarageHostDashboard() {
 
   const wait = (ms: number) => new Promise((resolve) => setTimeout(resolve, ms));
 
-  const loadData = async () => {
-    setLoading(true);
+  const loadData = async (options?: { silent?: boolean }) => {
+    const silent = Boolean(options?.silent);
+    if (!silent) {
+      setLoading(true);
+    }
+
     try {
       let resolvedGarage: any = null;
 
@@ -227,13 +232,17 @@ export default function GarageHostDashboard() {
       });
     } catch (error: any) {
       console.error("Garage loading failed:", error);
-      toast({
-        title: "Error Loading Garage",
-        description: error.message || "Failed to load garage data. Please try refreshing or creating a garage.",
-        variant: "destructive",
-      });
+      if (!silent) {
+        toast({
+          title: "Error Loading Garage",
+          description: error.message || "Failed to load garage data. Please try refreshing or creating a garage.",
+          variant: "destructive",
+        });
+      }
     } finally {
-      setLoading(false);
+      if (!silent) {
+        setLoading(false);
+      }
     }
   };
 
@@ -266,7 +275,7 @@ export default function GarageHostDashboard() {
   useEffect(() => {
     if (authLoading) return;
     if (!user) return;
-    loadData();
+    void loadData();
   }, [authLoading, user]);
 
   useEffect(() => {
@@ -275,11 +284,19 @@ export default function GarageHostDashboard() {
     if (garage) return;
 
     const retryTimer = window.setTimeout(() => {
-      loadData();
+      void loadData({ silent: true });
     }, 1500);
 
     return () => window.clearTimeout(retryTimer);
   }, [authLoading, user, loading, garage]);
+
+  useAutoRefresh(
+    () => loadData({ silent: true }),
+    {
+      enabled: !authLoading && !!user,
+      intervalMs: 8000,
+    }
+  );
 
   const handleUpdateBookingStatus = async (trackingId: string, status: string) => {
     try {

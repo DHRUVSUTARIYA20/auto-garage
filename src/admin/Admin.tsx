@@ -6,6 +6,7 @@ import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Input } from "@/components/ui/input";
 import { useAuth } from "@/context/useAuth";
 import { useToast } from "@/hooks/use-toast";
+import { useAutoRefresh } from "@/hooks/useAutoRefresh";
 import { api } from "@/lib/api-client";
 import ProfileEditorDialog from "@/components/ProfileEditorDialog";
 import { Building2, MapPin, Phone, Plus, Search, UserCog, Users, TrendingUp, Filter, CheckCircle2, Clock } from "lucide-react";
@@ -229,8 +230,12 @@ const Admin = () => {
   const [expandedGarageId, setExpandedGarageId] = useState<string | null>(null);
   const isAdminUser = !!user && user.role === "admin";
 
-  const loadAdminData = async () => {
-    setLoading(true);
+  const loadAdminData = async (options?: { silent?: boolean }) => {
+    const silent = Boolean(options?.silent);
+    if (!silent) {
+      setLoading(true);
+    }
+
     try {
       const [garageResult, bookingResult, userResult] = await Promise.all([
         api.getGarages(),
@@ -266,17 +271,29 @@ const Admin = () => {
         setSelectedCustomerEmail(nextBookings[0].email);
       }
     } catch (error: any) {
-      toast({ title: "Failed to load admin data", description: error.message, variant: "destructive" });
+      if (!silent) {
+        toast({ title: "Failed to load admin data", description: error.message, variant: "destructive" });
+      }
     } finally {
-      setLoading(false);
+      if (!silent) {
+        setLoading(false);
+      }
     }
   };
 
   useEffect(() => {
     if (authLoading) return;
-    loadAdminData();
+    void loadAdminData();
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [authLoading]);
+
+  useAutoRefresh(
+    () => loadAdminData({ silent: true }),
+    {
+      enabled: !authLoading && isAdminUser,
+      intervalMs: 10000,
+    }
+  );
 
   const updateGarageEditField = (id: string, field: string, value: any, type: "garage" | "contact") => {
     if (type === "garage") {

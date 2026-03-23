@@ -1,4 +1,4 @@
-import { useState, useEffect } from "react";
+import { useCallback, useEffect, useState } from "react";
 import { useNavigate } from "react-router-dom";
 
 import { Button } from "@/components/ui/button";
@@ -9,6 +9,7 @@ import SimpleBill from "@/components/SimpleBill";
 import { getBookingsForUser, type BookingRecord } from "@/lib/bookings";
 import { useAuth } from "@/context/useAuth";
 import { useToast } from "@/hooks/use-toast";
+import { useAutoRefresh } from "@/hooks/useAutoRefresh";
 import ProfileEditorDialog from "@/components/ProfileEditorDialog";
 
 type Booking = BookingRecord;
@@ -21,6 +22,17 @@ const Dashboard = () => {
 
   const [selectedBillTrackingId, setSelectedBillTrackingId] = useState<string | null>(null);
 
+  const loadBookings = useCallback(async () => {
+    if (!user) return;
+
+    try {
+      const rows = await getBookingsForUser({ userId: user.id, email: user.email });
+      setBookings(rows);
+    } catch (error) {
+      console.error("Error loading bookings:", error);
+    }
+  }, [user]);
+
   useEffect(() => {
     if (!authLoading && !user) {
       navigate("/register");
@@ -31,23 +43,16 @@ const Dashboard = () => {
       return;
     }
 
-    let isMounted = true;
-    const loadBookings = async () => {
-      try {
-        console.log("📊 [Dashboard] Loading bookings for user:", user.id, user.email);
-        const rows = await getBookingsForUser({ userId: user.id, email: user.email });
-        console.log("📊 [Dashboard] Loaded bookings:", rows.length);
-        if (isMounted) {
-          setBookings(rows);
-        }
-      } catch (error) {
-        console.error("Error loading bookings:", error);
-      }
-    };
+    void loadBookings();
+  }, [navigate, user, authLoading, loadBookings]);
 
-    loadBookings();
-    return () => { isMounted = false; };
-  }, [navigate, user, authLoading]);
+  useAutoRefresh(
+    () => loadBookings(),
+    {
+      enabled: !authLoading && !!user,
+      intervalMs: 7000,
+    }
+  );
 
   const handleLogout = async () => {
     await logout();

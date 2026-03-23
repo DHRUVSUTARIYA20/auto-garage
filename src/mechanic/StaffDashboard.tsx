@@ -9,6 +9,7 @@ import { Textarea } from "@/components/ui/textarea";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { useAuth } from "@/context/useAuth";
 import { useToast } from "@/hooks/use-toast";
+import { useAutoRefresh } from "@/hooks/useAutoRefresh";
 import { api } from "@/lib/api-client";
 import ProfileEditorDialog from "@/components/ProfileEditorDialog";
 import {
@@ -67,6 +68,44 @@ const StaffDashboard = () => {
   const [expandedTaskId, setExpandedTaskId] = useState<string | null>(null);
   const [updateFormState, setUpdateFormState] = useState<Record<string, any>>({});
 
+  const loadDashboardData = async (options?: { silent?: boolean }) => {
+    const silent = Boolean(options?.silent);
+
+    if (!silent) {
+      setLoading(true);
+      setGarageLoading(true);
+    }
+
+    try {
+      const { data: garageData, error: garageError } = await api.getStaffGarageApi();
+      if (garageError) {
+        console.error("Garage load error:", garageError);
+      } else if (garageData) {
+        setGarage(garageData as Garage);
+      }
+
+      const { data: tasksData, error: tasksError } = await api.getStaffTasksApi();
+      if (tasksError) throw new Error(tasksError);
+      if (tasksData) {
+        setTasks(Array.isArray(tasksData) ? tasksData : []);
+      }
+    } catch (error) {
+      console.error("Error loading data:", error);
+      if (!silent) {
+        toast({
+          title: "Error",
+          description: "Failed to load dashboard",
+          variant: "destructive",
+        });
+      }
+    } finally {
+      if (!silent) {
+        setLoading(false);
+        setGarageLoading(false);
+      }
+    }
+  };
+
   useEffect(() => {
     if (!authLoading && !user) {
       navigate("/register");
@@ -82,41 +121,16 @@ const StaffDashboard = () => {
       return;
     }
 
-    let isMounted = true;
-    const loadData = async () => {
-      try {
-        // Load garage info
-        const { data: garageData, error: garageError } = await api.getStaffGarageApi();
-        if (garageError) {
-          console.error("Garage load error:", garageError);
-        } else if (isMounted && garageData) {
-          setGarage(garageData as Garage);
-        }
-        setGarageLoading(false);
+    void loadDashboardData();
+  }, [navigate, user, authLoading]);
 
-        // Load tasks
-        const { data: tasksData, error: tasksError } = await api.getStaffTasksApi();
-        if (tasksError) throw new Error(tasksError);
-        if (isMounted && tasksData) {
-          setTasks(Array.isArray(tasksData) ? tasksData : []);
-        }
-      } catch (error) {
-        console.error("Error loading data:", error);
-        toast({
-          title: "Error",
-          description: "Failed to load dashboard",
-          variant: "destructive",
-        });
-      } finally {
-        if (isMounted) setLoading(false);
-      }
-    };
-
-    loadData();
-    return () => {
-      isMounted = false;
-    };
-  }, [navigate, user, authLoading, toast]);
+  useAutoRefresh(
+    () => loadDashboardData({ silent: true }),
+    {
+      enabled: !authLoading && !!user && (user.role === "staff" || user.role === "mechanic"),
+      intervalMs: 8000,
+    }
+  );
 
   const handleLogout = async () => {
     await logout();
