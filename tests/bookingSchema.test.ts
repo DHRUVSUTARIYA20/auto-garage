@@ -1,0 +1,46 @@
+import { describe, it, expect } from 'vitest';
+import { bookingSchema } from '../src/pages/Booking';
+
+describe('booking schema validation', () => {
+  it('accepts a valid payload', () => {
+    const payload = {
+      date: new Date(Date.now() + 86400000), 
+      selectedServices: ['oil-change'],
+      selectedTime: '09:00 AM',
+      name: 'John Doe',
+      email: 'john@example.com',
+      phone: '1234567',
+      vehicle: '2010 Ford',
+      notes: 'Please check the brakes',
+    };
+
+    expect(() => bookingSchema.parse(payload)).not.toThrow();
+  });
+
+  it('rejects past date', () => {
+    const payload = {
+      date: new Date(Date.now() - 86400000), 
+      selectedServices: ['oil-change'],
+      selectedTime: '09:00 AM',
+      name: 'John Doe',
+      email: 'john@example.com',
+      phone: '1234567',
+      vehicle: '2010 Ford',
+    };
+
+    expect(() => bookingSchema.parse(payload)).toThrow();
+  });
+
+  it('requires at least one service', () => {
+    const payload = {
+      date: new Date(Date.now() + 86400000),
+      selectedServices: [],
+      selectedTime: '09:00 AM',
+      name: 'John Doe',
+      email: 'john@example.com',
+      vehicle: '2010 Ford',
+    };
+
+    expect(() => bookingSchema.parse(payload)).toThrow();
+  });
+});

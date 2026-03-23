@@ -1,0 +1,105 @@
+import React from "react";
+import { formatCurrency, convertUSDToINR } from "@/lib/currency";
+
+type Item = { name: string; price: number };
+
+export default function InvoiceModal({
+  open,
+  onClose,
+  items,
+  subtotalUSD,
+  currency,
+  rate,
+}: {
+  open: boolean;
+  onClose: () => void;
+  items: Item[];
+  subtotalUSD: number;
+  currency: "USD" | "INR";
+  rate?: number | null;
+}) {
+  if (!open) return null;
+
+  const format = (amount: number) => {
+    if (currency === "USD") return formatCurrency(amount, "USD");
+    if (typeof rate === "number") return formatCurrency(convertUSDToINR(amount, rate), "INR");
+    return "₹--";
+  };
+
+  const printInvoice = () => {
+    const content = document.getElementById("invoice-print")?.innerHTML;
+    if (!content) return;
+    const w = window.open("", "_blank", "width=800,height=600");
+    if (!w) return;
+    w.document.write(`
+      <html>
+        <head>
+          <title>Invoice</title>
+          <meta name="viewport" content="width=device-width, initial-scale=1" />
+          <style>body{font-family:Arial,Helvetica,sans-serif;padding:20px;color:#111}table{width:100%;border-collapse:collapse}td,th{padding:8px;border-bottom:1px solid #eee;text-align:left}h2{text-align:center}</style>
+        </head>
+        <body>
+          ${content}
+        </body>
+      </html>
+    `);
+    w.document.close();
+    w.focus();
+    setTimeout(() => {
+      w.print();
+      // do not close automatically, let user choose
+    }, 250);
+  };
+
+  return (
+    <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40 p-4">
+      <div className="bg-card rounded-lg w-full max-w-2xl shadow-lg overflow-hidden">
+        <div className="p-6 border-b">
+          <div className="flex items-center justify-between">
+            <h3 className="font-display text-lg">Invoice</h3>
+            <div className="flex items-center gap-2">
+              <button onClick={printInvoice} className="px-3 py-1 rounded bg-primary text-white">Print / Save</button>
+              <button onClick={onClose} className="px-3 py-1 rounded border">Close</button>
+            </div>
+          </div>
+        </div>
+
+        <div id="invoice-print" className="p-6 bg-card-foreground/2">
+          <div className="mb-4">
+            <div className="flex items-center justify-between">
+              <div>
+                <h2 className="font-display text-xl">Auto Garage</h2>
+                <div className="text-sm text-muted-foreground">Professional Car Care</div>
+              </div>
+              <div className="text-sm text-muted-foreground">{new Date().toLocaleString()}</div>
+            </div>
+          </div>
+
+          <table>
+            <thead>
+              <tr>
+                <th className="text-sm text-muted-foreground">Service</th>
+                <th className="text-sm text-muted-foreground">Price ({currency})</th>
+              </tr>
+            </thead>
+            <tbody>
+              {items.map((item, i) => (
+                <tr key={i}>
+                  <td>{item.name}</td>
+                  <td>{format(item.price)}</td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+
+          <div className="mt-6 flex items-center justify-end">
+            <div className="text-right">
+              <div className="text-sm text-muted-foreground">Subtotal</div>
+              <div className="font-display text-xl text-primary">{format(subtotalUSD)}</div>
+            </div>
+          </div>
+        </div>
+      </div>
+    </div>
+  );
+}
