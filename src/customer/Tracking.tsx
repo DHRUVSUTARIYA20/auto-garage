@@ -34,6 +34,9 @@ type BookingStatus = {
   homeAddress?: string | null;
   notes?: string | null;
   deliveryFee?: number | null;
+  paymentStatus?: "paid" | "unpaid";
+  paymentMethod?: string | null;
+  garageName?: string | null;
 };
 
 const Tracking = () => {
@@ -344,8 +347,13 @@ const Tracking = () => {
                       deliveryFee={booking.deliveryOption && booking.deliveryOption !== "none" ? (booking.deliveryFee || 0) : undefined}
                       total={booking.total}
                       status={booking.status}
+                      paymentStatus={booking.paymentStatus}
+                      paymentMethod={booking.paymentMethod || undefined}
                       completedDate={new Date().toISOString()}
                       notes={booking.notes || undefined}
+                      garageInfo={{
+                        name: booking.garageName || "Auto Garage",
+                      }}
                     />
                   </div>
                 )}

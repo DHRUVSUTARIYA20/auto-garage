@@ -13,12 +13,65 @@ const normalizeStatus = (value?: string) => {
     return normalized;
 };
 
+const normalizePaymentStatus = (value?: string) => {
+    const normalized = String(value || "unpaid").trim().toLowerCase();
+    return normalized === "paid" ? "paid" : "unpaid";
+};
+
+const normalizePaymentMethod = (value?: string) => {
+    const normalized = String(value || "").trim().toLowerCase();
+    if (!normalized) return null;
+    return normalized;
+};
+
 const sortByCreatedAtDesc = (rows: Array<Record<string, any>>) =>
     rows.sort((a, b) => {
         const aTime = Date.parse(String(a.createdAt || "")) || 0;
         const bTime = Date.parse(String(b.createdAt || "")) || 0;
         return bTime - aTime;
     });
+
+const enrichGarageName = async (rows: Array<Record<string, any>>) => {
+    if (!rows.length) return rows;
+
+    const garageIds = Array.from(
+        new Set(
+            rows
+                .map((row) => String(row.garageId || row.garage_id || "").trim())
+                .filter(Boolean)
+        )
+    );
+
+    if (!garageIds.length) return rows;
+
+    const garageNameById = new Map<string, string>();
+
+    await Promise.all(
+        garageIds.map(async (garageId) => {
+            try {
+                const snap = await garagesCol().doc(garageId).get();
+                if (!snap.exists) return;
+                const data = snap.data() || {};
+                const name = String((data as any).garage_name || (data as any).name || "").trim();
+                if (name) {
+                    garageNameById.set(garageId, name);
+                }
+            } catch {
+                // Keep response resilient even if one garage lookup fails.
+            }
+        })
+    );
+
+    return rows.map((row) => {
+        const garageId = String(row.garageId || row.garage_id || "").trim();
+        const garageName = garageNameById.get(garageId) || row.garageName || row.garage_name || null;
+        return {
+            ...row,
+            garageName,
+            garage_name: garageName,
+        };
+    });
+};
 
 const getBookingsList = async (customerId?: string) => {
     try {
@@ -31,8 +84,9 @@ const getBookingsList = async (customerId?: string) => {
             const snap = await bookingsCol().get();
             const rows = snap.docs.map((d) => ({ id: d.id, ...d.data() }));
             const sorted = sortByCreatedAtDesc(rows);
+            const enriched = await enrichGarageName(sorted);
             console.log("   ✅ Total bookings fetched:", sorted.length);
-            return sorted;
+            return enriched;
         }
         
         // Query with customerId field (new format)
@@ -49,8 +103,9 @@ const getBookingsList = async (customerId?: string) => {
                 return { id: d.id, ...data };
             });
             const sorted = sortByCreatedAtDesc(results);
+            const enriched = await enrichGarageName(sorted);
             console.log("   Total returned:", sorted.length);
-            return sorted;
+            return enriched;
         }
         
         // If not found with customerId, try userId field (legacy format)
@@ -67,8 +122,9 @@ const getBookingsList = async (customerId?: string) => {
                 return { id: d.id, ...data };
             });
             const sorted = sortByCreatedAtDesc(results);
+            const enriched = await enrichGarageName(sorted);
             console.log("   Total returned:", sorted.length);
-            return sorted;
+            return enriched;
         }
         
         // If still not found, list ALL bookings to see what's there
@@ -133,6 +189,8 @@ router.post("/", authenticate, async (req: AuthRequest, res) => {
             subtotal: subtotal ?? total ?? total_price ?? 0,
             totalPrice: total_price ?? total ?? subtotal ?? 0,
             status: normalizedStatus,
+            paymentStatus: "unpaid",
+            paymentMethod: null,
             serviceDate: service_date || date || null,
             date: date || service_date || null,
             createdAt: new Date().toISOString(),
@@ -163,6 +221,20 @@ router.get("/track/:trackingId", async (req, res) => {
 
         const doc = snap.docs[0];
         const data = doc.data();
+        const garageId = String(data.garageId || data.garage_id || "").trim();
+        let garageName: string | null = null;
+
+        if (garageId) {
+            try {
+                const garageSnap = await garagesCol().doc(garageId).get();
+                if (garageSnap.exists) {
+                    const garageData = garageSnap.data() || {};
+                    garageName = String((garageData as any).garage_name || (garageData as any).name || "").trim() || null;
+                }
+            } catch {
+                garageName = null;
+            }
+        }
 
         // Public tracking should expose only customer-facing booking progress.
         // Internal staff/mechanic task fields are intentionally omitted.
@@ -192,6 +264,12 @@ router.get("/track/:trackingId", async (req, res) => {
             customer_id: data.customerId,
             total: data.totalPrice,
             total_price: data.totalPrice,
+            paymentStatus: normalizePaymentStatus(data.paymentStatus || data.payment_status),
+            payment_status: normalizePaymentStatus(data.paymentStatus || data.payment_status),
+            paymentMethod: data.paymentMethod || data.payment_method || null,
+            payment_method: data.paymentMethod || data.payment_method || null,
+            garageName,
+            garage_name: garageName,
         };
 
         res.json(normalized);
@@ -277,6 +355,58 @@ router.patch("/status/:id", authenticate, async (req: AuthRequest, res) => {
         res.json({ id: updatedSnap.id, ...updatedSnap.data() });
     } catch (error: any) {
         res.status(500).json({ error: "Failed to update booking status" });
+    }
+});
+
+// Update payment status/details
+router.patch("/payment/:id", authenticate, async (req: AuthRequest, res) => {
+    try {
+        const { id } = req.params;
+        const { paymentStatus, paymentMethod } = req.body || {};
+        const normalizedRole = String(req.userRole || "").toLowerCase();
+
+        let bookingDoc: FirebaseFirestore.QueryDocumentSnapshot | null = null;
+        const byId = await bookingsCol().doc(id).get();
+        if (byId.exists) {
+            bookingDoc = byId as any;
+        } else {
+            const byTracking = await bookingsCol().where("trackingId", "==", id).limit(1).get();
+            if (!byTracking.empty) bookingDoc = byTracking.docs[0];
+        }
+
+        if (!bookingDoc) return res.status(404).json({ error: "Booking not found" });
+
+        const bookingData = bookingDoc.data()!;
+        const bookingGarageId = String(bookingData.garageId || bookingData.garage_id || "").trim() || null;
+        let canUpdate = normalizedRole === "admin";
+
+        if (!canUpdate && bookingGarageId) {
+            const garageSnap = await garagesCol().doc(bookingGarageId).get();
+            if (garageSnap.exists) {
+                canUpdate = garageSnap.data()?.ownerId === req.userId;
+            }
+        }
+
+        if (!canUpdate) {
+            return res.status(403).json({ error: "Unauthorized" });
+        }
+
+        const nextPaymentStatus = normalizePaymentStatus(paymentStatus);
+        const nextPaymentMethod = nextPaymentStatus === "paid"
+            ? normalizePaymentMethod(paymentMethod)
+            : null;
+
+        await bookingsCol().doc(bookingDoc.id).update({
+            paymentStatus: nextPaymentStatus,
+            paymentMethod: nextPaymentMethod,
+            paymentUpdatedAt: new Date().toISOString(),
+            updatedAt: new Date().toISOString(),
+        });
+
+        const updatedSnap = await bookingsCol().doc(bookingDoc.id).get();
+        res.json({ id: updatedSnap.id, ...updatedSnap.data() });
+    } catch (error: any) {
+        res.status(500).json({ error: "Failed to update payment details" });
     }
 });
 

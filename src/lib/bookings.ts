@@ -23,6 +23,9 @@ export type BookingRecord = {
   subtotal?: number | null;
   total: number;
   status: string;
+  paymentStatus?: "paid" | "unpaid";
+  paymentMethod?: string | null;
+  garageName?: string | null;
   createdAt: string;
   userId?: string | null;
 };
@@ -70,6 +73,9 @@ const mapBookingResponse = (data: any): BookingRecord => ({
   subtotal: toNumber(data.subtotal ?? data.sub_total ?? data.totalPrice ?? data.total_price ?? data.total, 0),
   total: toNumber(data.total ?? data.total_price ?? data.totalPrice ?? data.subtotal, 0),
   status: data.status,
+  paymentStatus: String(data.paymentStatus ?? data.payment_status ?? "unpaid").toLowerCase() === "paid" ? "paid" : "unpaid",
+  paymentMethod: String(data.paymentMethod ?? data.payment_method ?? "").trim() || null,
+  garageName: String(data.garageName ?? data.garage_name ?? data.garage?.name ?? "").trim() || null,
   createdAt: data.createdAt || data.created_at,
   userId: data.userId || data.user_id,
 });

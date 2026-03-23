@@ -9,6 +9,7 @@ import { useToast } from "@/hooks/use-toast";
 import { useAutoRefresh } from "@/hooks/useAutoRefresh";
 import { api } from "@/lib/api-client";
 import ProfileEditorDialog from "@/components/ProfileEditorDialog";
+import SimpleBill from "@/components/SimpleBill";
 import {
   Users,
   Calendar,
@@ -61,6 +62,12 @@ type Booking = {
   progressPercentage?: number;
   taskNotes?: string;
   createdAt: string;
+  services?: Array<{ name?: string; price?: number }>;
+  subtotal?: number;
+  deliveryFee?: number;
+  notes?: string;
+  paymentStatus?: "paid" | "unpaid";
+  paymentMethod?: string | null;
 };
 
 type Garage = {
@@ -114,6 +121,28 @@ const normalizeServiceCatalog = (raw: any): Array<{ id: string; name: string; pr
   return [];
 };
 
+const normalizeBookingServices = (raw: any): Array<{ name: string; price: number }> => {
+  if (!Array.isArray(raw)) return [];
+
+  return raw
+    .map((item) => {
+      if (typeof item === "string") {
+        const name = item.trim();
+        if (!name) return null;
+        return { name, price: 0 };
+      }
+
+      if (!item || typeof item !== "object") return null;
+
+      const name = String(item.name ?? item.service_name ?? item.service ?? "").trim();
+      const price = Number(item.price ?? item.amount ?? 0) || 0;
+
+      if (!name) return null;
+      return { name, price };
+    })
+    .filter((entry): entry is { name: string; price: number } => Boolean(entry));
+};
+
 export default function GarageHostDashboard() {
   const { user, loading: authLoading, logout } = useAuth();
   const navigate = useNavigate();
@@ -139,6 +168,7 @@ export default function GarageHostDashboard() {
   const [assignTaskBookingId, setAssignTaskBookingId] = useState<string | null>(null);
   const [selectedStaffForAssignment, setSelectedStaffForAssignment] = useState<string>("");
   const [bookingsFilter, setBookingsFilter] = useState<"all" | "pending" | "in-progress" | "completed" | "unassigned">("all");
+  const [selectedBillBookingId, setSelectedBillBookingId] = useState<string | null>(null);
 
   const normalizeGarageData = (raw: Record<string, any>): Garage => ({
     id: String(raw.id ?? ""),
@@ -176,7 +206,13 @@ export default function GarageHostDashboard() {
       taskStatus: b.taskStatus || b.task_status || "",
       progressPercentage: Number(b.progressPercentage ?? b.progress_percentage ?? 0),
       taskNotes: b.taskNotes || b.task_notes || "",
-      createdAt: b.created_at || b.createdAt || ""
+      createdAt: b.created_at || b.createdAt || "",
+      services: normalizeBookingServices(b.services ?? b.selectedServices ?? b.service_items),
+      subtotal: Number(b.subtotal ?? b.total_before_delivery ?? 0) || 0,
+      deliveryFee: Number(b.delivery_fee ?? b.deliveryFee ?? 0) || 0,
+      notes: String(b.notes ?? b.additional_notes ?? ""),
+      paymentStatus: String(b.paymentStatus ?? b.payment_status ?? "unpaid").toLowerCase() === "paid" ? "paid" : "unpaid",
+      paymentMethod: String(b.paymentMethod ?? b.payment_method ?? "").trim() || null,
     }))
   });
 
@@ -306,6 +342,25 @@ export default function GarageHostDashboard() {
       loadData();
     } catch (error: any) {
       toast({ title: "Error", description: error.message, variant: "destructive" });
+    }
+  };
+
+  const handleUpdatePayment = async (
+    bookingIdOrTrackingId: string,
+    paymentStatus: "paid" | "unpaid",
+    paymentMethod?: string
+  ) => {
+    try {
+      const finalMethod = paymentStatus === "paid" ? (paymentMethod || "cash") : "";
+      const { error } = await api.updateBookingPaymentApi(bookingIdOrTrackingId, paymentStatus, finalMethod);
+      if (error) throw new Error(error);
+      toast({
+        title: "Payment updated",
+        description: `Marked as ${paymentStatus}${paymentStatus === "paid" ? ` via ${finalMethod}` : ""}.`,
+      });
+      void loadData({ silent: true });
+    } catch (error: any) {
+      toast({ title: "Payment update failed", description: error.message, variant: "destructive" });
     }
   };
 
@@ -502,6 +557,11 @@ export default function GarageHostDashboard() {
     
     return filtered;
   }, [garage, bookingsFilter]);
+
+  const selectedBillBooking = useMemo(
+    () => garage?.bookings.find((entry) => entry.id === selectedBillBookingId) || null,
+    [garage, selectedBillBookingId]
+  );
 
   // Safe to check after all hooks
   if (authLoading) {
@@ -930,6 +990,14 @@ export default function GarageHostDashboard() {
                                   >
                                     {booking.status}
                                   </Badge>
+                                  <Badge className={booking.paymentStatus === "paid" ? "bg-emerald-100 text-emerald-800" : "bg-rose-100 text-rose-800"}>
+                                    {booking.paymentStatus === "paid" ? "PAID" : "UNPAID"}
+                                  </Badge>
+                                  {booking.paymentMethod && (
+                                    <Badge variant="outline" className="text-[9px] uppercase font-bold">
+                                      {booking.paymentMethod}
+                                    </Badge>
+                                  )}
                                   {booking.assignedTo && (
                                     <Badge className="bg-green-100 text-green-800 text-[9px]">
                                       ✓ Assigned
@@ -991,6 +1059,39 @@ export default function GarageHostDashboard() {
                                   <option value="completed">Completed</option>
                                   <option value="cancelled">Cancelled</option>
                                 </select>
+                                <select
+                                  className="h-9 px-3 rounded-md border text-xs font-bold uppercase bg-background"
+                                  value={booking.paymentStatus || "unpaid"}
+                                  onChange={(e) =>
+                                    handleUpdatePayment(
+                                      booking.id,
+                                      e.target.value === "paid" ? "paid" : "unpaid",
+                                      booking.paymentMethod || "cash"
+                                    )
+                                  }
+                                >
+                                  <option value="unpaid">Unpaid</option>
+                                  <option value="paid">Paid</option>
+                                </select>
+                                <select
+                                  className="h-9 px-3 rounded-md border text-xs font-bold uppercase bg-background"
+                                  value={booking.paymentMethod || "cash"}
+                                  disabled={(booking.paymentStatus || "unpaid") !== "paid"}
+                                  onChange={(e) =>
+                                    handleUpdatePayment(
+                                      booking.id,
+                                      (booking.paymentStatus || "unpaid") === "paid" ? "paid" : "unpaid",
+                                      e.target.value
+                                    )
+                                  }
+                                >
+                                  <option value="cash">Cash</option>
+                                  <option value="upi">UPI</option>
+                                  <option value="card">Card</option>
+                                  <option value="netbanking">Net Banking</option>
+                                  <option value="wallet">Wallet</option>
+                                  <option value="bank-transfer">Bank Transfer</option>
+                                </select>
                                 {garage.staff.length > 0 && !booking.assignedTo ? (
                                   <Button
                                     size="sm"
@@ -1010,6 +1111,16 @@ export default function GarageHostDashboard() {
                                   >
                                     <Wrench className="w-4 h-4" />
                                     {booking.assignedTo ? "Assigned" : "No Staff"}
+                                  </Button>
+                                )}
+                                {normalizeStatusKey(booking.status) === "completed" && (
+                                  <Button
+                                    size="sm"
+                                    variant="outline"
+                                    className="h-9"
+                                    onClick={() => setSelectedBillBookingId(booking.id)}
+                                  >
+                                    Bill
                                   </Button>
                                 )}
                               </div>
@@ -1181,6 +1292,49 @@ export default function GarageHostDashboard() {
                 </div>
               )}
           </div>
+
+          {selectedBillBooking && (
+            <div
+              className="fixed inset-0 z-50 bg-black/50 p-4 flex items-center justify-center"
+              onClick={() => setSelectedBillBookingId(null)}
+            >
+              <div
+                className="bg-white rounded-lg shadow-xl max-h-[90vh] overflow-y-auto max-w-3xl w-full"
+                onClick={(event) => event.stopPropagation()}
+              >
+                <div className="p-5 border-b flex items-center justify-between sticky top-0 bg-white">
+                  <h3 className="text-xl font-bold text-slate-900">Customer Invoice</h3>
+                  <Button variant="ghost" size="sm" className="text-slate-700 hover:text-slate-900" onClick={() => setSelectedBillBookingId(null)}>
+                    <X className="w-4 h-4" />
+                  </Button>
+                </div>
+                <div className="p-5">
+                  <SimpleBill
+                    trackingId={selectedBillBooking.trackingId}
+                    customerName={selectedBillBooking.name}
+                    customerEmail={selectedBillBooking.email}
+                    customerPhone={selectedBillBooking.phone || undefined}
+                    vehicle={selectedBillBooking.vehicle}
+                    serviceDate={selectedBillBooking.date}
+                    services={selectedBillBooking.services || []}
+                    subtotal={selectedBillBooking.subtotal}
+                    deliveryFee={selectedBillBooking.deliveryFee}
+                    total={selectedBillBooking.total}
+                    status={selectedBillBooking.status}
+                    paymentStatus={selectedBillBooking.paymentStatus}
+                    paymentMethod={selectedBillBooking.paymentMethod || undefined}
+                    completedDate={selectedBillBooking.createdAt}
+                    notes={selectedBillBooking.notes || undefined}
+                    garageInfo={{
+                      name: garage.name,
+                      phone: garage.contactPhone || undefined,
+                      address: garage.addressStreet || undefined,
+                    }}
+                  />
+                </div>
+              </div>
+            </div>
+          )}
         </div>
       </main>
     </div>

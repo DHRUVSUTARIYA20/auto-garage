@@ -812,6 +812,13 @@ class ApiClient {
     });
   }
 
+  async updateBookingPaymentApi(bookingIdOrTrackingId: string, paymentStatus: "paid" | "unpaid", paymentMethod?: string) {
+    return this.request(`/bookings/payment/${bookingIdOrTrackingId}`, {
+      method: "PATCH",
+      body: JSON.stringify({ paymentStatus, paymentMethod }),
+    });
+  }
+
   async assignTaskToStaffApi(bookingId: string, staffUserId: string, staffName: string) {
     return this.request(`/bookings/${bookingId}/assign-task`, {
       method: "PATCH",

@@ -215,8 +215,8 @@ const Dashboard = () => {
         <div className="fixed inset-0 bg-black/50 z-50 flex items-center justify-center p-4" onClick={() => setSelectedBillTrackingId(null)}>
           <div className="bg-white rounded-lg shadow-xl max-h-[90vh] overflow-y-auto max-w-2xl w-full" onClick={e => e.stopPropagation()}>
             <div className="p-6 border-b flex items-center justify-between sticky top-0 bg-white">
-              <h2 className="text-2xl font-bold">Service Bill</h2>
-              <Button variant="ghost" size="sm" onClick={() => setSelectedBillTrackingId(null)}>
+              <h2 className="text-2xl font-bold text-slate-900">Service Bill</h2>
+              <Button variant="ghost" size="sm" className="text-slate-700 hover:text-slate-900" onClick={() => setSelectedBillTrackingId(null)}>
                 <X className="w-5 h-5" />
               </Button>
             </div>
@@ -234,7 +234,12 @@ const Dashboard = () => {
                   deliveryFee={bookings.find(b => b.trackingId === selectedBillTrackingId)?.deliveryFee}
                   total={bookings.find(b => b.trackingId === selectedBillTrackingId)?.total || 0}
                   status={bookings.find(b => b.trackingId === selectedBillTrackingId)?.status || ""}
+                  paymentStatus={bookings.find(b => b.trackingId === selectedBillTrackingId)?.paymentStatus}
+                  paymentMethod={bookings.find(b => b.trackingId === selectedBillTrackingId)?.paymentMethod || undefined}
                   completedDate={new Date().toISOString()}
+                  garageInfo={{
+                    name: bookings.find(b => b.trackingId === selectedBillTrackingId)?.garageName || "Auto Garage",
+                  }}
                 />
               )}
             </div>
